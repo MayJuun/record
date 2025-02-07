@@ -7,40 +7,42 @@ cmake_minimum_required(VERSION 3.10)
 set(PROJECT_NAME "record_linux")
 project(${PROJECT_NAME} LANGUAGES CXX)
 
+# Find the PulseAudio package (libpulse-simple).
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(PULSE REQUIRED libpulse-simple)
+
 # This value is used when generating builds using this plugin, so it must
 # not be changed.
 set(PLUGIN_NAME "record_linux_plugin")
 
-# Define the plugin library target. Its name must not be changed (see comment
-# on PLUGIN_NAME above).
-#
-# Any new source files that you add to the plugin should be added here.
+# Define the plugin library target. Its name must not be changed.
+# Add any new source files that you add to the plugin below.
 add_library(${PLUGIN_NAME} SHARED
   "record_linux_plugin.cc"
 )
 
-# Apply a standard set of build settings that are configured in the
-# application-level CMakeLists.txt. This can be removed for plugins that want
-# full control over build settings.
+# Apply a standard set of build settings configured in the application-level
+# CMakeLists.txt.
 apply_standard_settings(${PLUGIN_NAME})
 
-# Symbols are hidden by default to reduce the chance of accidental conflicts
-# between plugins. This should not be removed; any symbols that should be
-# exported should be explicitly exported with the FLUTTER_PLUGIN_EXPORT macro.
+# Symbols are hidden by default. Any symbols that should be exported must
+# be explicitly exported with the FLUTTER_PLUGIN_EXPORT macro.
 set_target_properties(${PLUGIN_NAME} PROPERTIES
   CXX_VISIBILITY_PRESET hidden)
 target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 
-# Source include directories and library dependencies. Add any plugin-specific
-# dependencies here.
-target_include_directories(${PLUGIN_NAME} INTERFACE
-  "${CMAKE_CURRENT_SOURCE_DIR}/include")
+# Specify include directories and library dependencies.
+# We add "${CMAKE_CURRENT_SOURCE_DIR}/include" so that
+# #include <record_linux/record_linux_plugin.h> works.
+target_include_directories(${PLUGIN_NAME} PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  ${PULSE_INCLUDE_DIRS}
+)
+
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
-target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
+target_link_libraries(${PLUGIN_NAME} PRIVATE ${PULSE_LIBRARIES})
 
 # List of absolute paths to libraries that should be bundled with the plugin.
-# This list could contain prebuilt libraries, or libraries created by an
-# external build triggered from this build file.
 set(record_linux_bundled_libraries
   ""
   PARENT_SCOPE

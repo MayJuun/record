@@ -1,9 +1,7 @@
-# The Flutter tooling requires that developers have CMake 3.10 or later
-# installed. You should not increase this version, as doing so will cause
-# the plugin to fail to compile for some customers of the plugin.
+# The Flutter tooling requires that developers have CMake 3.10 or later.
 cmake_minimum_required(VERSION 3.10)
 
-# Project-level configuration.
+# Set the plugin name (change if you prefer something else).
 set(PROJECT_NAME "record_linux")
 project(${PROJECT_NAME} LANGUAGES CXX)
 
@@ -11,38 +9,38 @@ project(${PROJECT_NAME} LANGUAGES CXX)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PULSE REQUIRED libpulse-simple)
 
-# This value is used when generating builds using this plugin, so it must
-# not be changed.
+# This value is used by Flutter tooling; do not change it.
 set(PLUGIN_NAME "record_linux_plugin")
 
 # Define the plugin library target. Its name must not be changed.
-# Add any new source files that you add to the plugin below.
 add_library(${PLUGIN_NAME} SHARED
   "record_linux_plugin.cc"
+  # If you have other .cc files, list them here, e.g.:
+  # "some_other_file.cc"
 )
 
-# Apply a standard set of build settings configured in the application-level
-# CMakeLists.txt.
+# Apply a standard set of build settings configured in the
+# application-level CMakeLists.txt. This comes from the Flutter toolchain.
 apply_standard_settings(${PLUGIN_NAME})
 
-# Symbols are hidden by default. Any symbols that should be exported must
-# be explicitly exported with the FLUTTER_PLUGIN_EXPORT macro.
+# Symbols are hidden by default. Any symbols that should be exported
+# must be explicitly exported with the FLUTTER_PLUGIN_EXPORT macro.
 set_target_properties(${PLUGIN_NAME} PROPERTIES
   CXX_VISIBILITY_PRESET hidden)
+
 target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 
-# Specify include directories and library dependencies.
-# We add "${CMAKE_CURRENT_SOURCE_DIR}/include" so that
-# #include <record_linux/record_linux_plugin.h> works.
+# Let the plugin code do #include <record_linux/record_linux_plugin.h>.
 target_include_directories(${PLUGIN_NAME} PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include"
   ${PULSE_INCLUDE_DIRS}
 )
 
+# Link to the Flutter library and PulseAudio libraries
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
 target_link_libraries(${PLUGIN_NAME} PRIVATE ${PULSE_LIBRARIES})
 
-# List of absolute paths to libraries that should be bundled with the plugin.
+# Provide an empty variable for bundling if needed.
 set(record_linux_bundled_libraries
   ""
   PARENT_SCOPE

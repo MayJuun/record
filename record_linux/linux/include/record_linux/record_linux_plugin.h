@@ -8,27 +8,11 @@
 #include <stdint.h>
 #include <string>  // for std::string usage
 
-////////////////////////////////////////////////////////////////////////////////
-// Define FLUTTER_PLUGIN_EXPORT if it's not already defined.
-////////////////////////////////////////////////////////////////////////////////
-#ifndef FLUTTER_PLUGIN_EXPORT
-#if defined(_WIN32)
-  #if defined(FLUTTER_PLUGIN_IMPL)
-    #define FLUTTER_PLUGIN_EXPORT __declspec(dllexport)
-  #else
-    #define FLUTTER_PLUGIN_EXPORT __declspec(dllimport)
-  #endif
-#else
-  #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
-#endif
-#endif
-////////////////////////////////////////////////////////////////////////////////
-
 G_BEGIN_DECLS
 
-// ---------------------------------------------------------------------------
-//  WAV header struct used by both header & .cc
-// ---------------------------------------------------------------------------
+////////////////////////////////////////////////////////////////////////////////
+//  WAV header struct used by both .h & .cc
+////////////////////////////////////////////////////////////////////////////////
 #pragma pack(push, 1)
 typedef struct {
   char riff[4];
@@ -47,22 +31,22 @@ typedef struct {
 } WavHeader;
 #pragma pack(pop)
 
-// ---------------------------------------------------------------------------
+////////////////////////////////////////////////////////////////////////////////
 //  Forward declarations of our GObject struct and class
-// ---------------------------------------------------------------------------
-typedef struct _RecordLinuxPlugin RecordLinuxPlugin;
+////////////////////////////////////////////////////////////////////////////////
+typedef struct _RecordLinuxPlugin      RecordLinuxPlugin;
 typedef struct _RecordLinuxPluginClass RecordLinuxPluginClass;
 
-// ---------------------------------------------------------------------------
+////////////////////////////////////////////////////////////////////////////////
 //  The RecordLinuxPlugin struct
-//  Must match the fields referenced in your .cc
-// ---------------------------------------------------------------------------
+//  Must contain ALL your fields (like std::string file_path, buffer, etc.)
+////////////////////////////////////////////////////////////////////////////////
 struct _RecordLinuxPlugin {
-  GObject parent_instance;
+  GObject parent_instance;  // MUST be first
 
   // PulseAudio
-  pa_simple* pa_handle;         // for pa_simple_new()
-  pa_sample_spec pa_spec;       // for pulse sample spec
+  pa_simple* pa_handle;
+  pa_sample_spec pa_spec;
 
   // Recording state
   bool is_recording;
@@ -74,8 +58,8 @@ struct _RecordLinuxPlugin {
   GMutex state_mutex;
   GCond pause_cond;
 
-  // Audio buffer (if you want a fixed array)
-  static const size_t K_BUFFER_SIZE = 4096;  // or just define a macro
+  // Audio buffer
+  static const size_t K_BUFFER_SIZE = 4096;
   uint8_t buffer[K_BUFFER_SIZE];
 
   // Flutter method channel
@@ -84,7 +68,7 @@ struct _RecordLinuxPlugin {
   // File-based recording
   FILE* file_handle;
   size_t total_data_bytes;
-  std::string file_path;  // use std::string
+  std::string file_path;  // can call file_path.clear() safely
 
   // WAV header
   WavHeader wav_header;
@@ -97,20 +81,24 @@ struct _RecordLinuxPluginClass {
 #define RECORD_LINUX_PLUGIN(obj) \
   (G_TYPE_CHECK_INSTANCE_CAST((obj), record_linux_plugin_get_type(), RecordLinuxPlugin))
 
-// Returns the GType for our plugin
-GType record_linux_plugin_get_type();
+////////////////////////////////////////////////////////////////////////////////
+//  We'll declare a manual "record_linux_plugin_get_type()" function
+////////////////////////////////////////////////////////////////////////////////
+GType record_linux_plugin_get_type(void);
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Exported registration function so Flutter can call it
-FLUTTER_PLUGIN_EXPORT void record_linux_plugin_register_with_registrar(
-    FlPluginRegistrar* registrar);
+////////////////////////////////////////////////////////////////////////////////
+//  Exported registration function so Flutter can call it
+////////////////////////////////////////////////////////////////////////////////
+__attribute__((visibility("default")))
+void record_linux_plugin_register_with_registrar(FlPluginRegistrar* registrar);
 
-// ---------------------------------------------------------------------------
+////////////////////////////////////////////////////////////////////////////////
 //  Non-static function declarations matching the .cc definitions
-// ---------------------------------------------------------------------------
+////////////////////////////////////////////////////////////////////////////////
 FlMethodResponse* create_recorder(RecordLinuxPlugin* self);
 FlMethodResponse* dispose_recorder(RecordLinuxPlugin* self);
 
@@ -131,10 +119,9 @@ FlMethodResponse* has_permission(RecordLinuxPlugin* self);
 FlMethodResponse* is_paused_fn(RecordLinuxPlugin* self);
 FlMethodResponse* is_recording_fn(RecordLinuxPlugin* self);
 
+G_END_DECLS
 #ifdef __cplusplus
 }
 #endif
-
-G_END_DECLS
 
 #endif  // FLUTTER_PLUGIN_RECORD_LINUX_PLUGIN_H_

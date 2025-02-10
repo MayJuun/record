@@ -12,13 +12,83 @@
 #include <string>
 #include <vector>
 
-////////////////////////////////////////////////////////////////////////////////
-// G_DEFINE_TYPE
-////////////////////////////////////////////////////////////////////////////////
+// ---------------------------------------------------------------------------
+// 1) We no longer use G_DEFINE_TYPE; we do manual GType registration
+// ---------------------------------------------------------------------------
+static void record_linux_plugin_class_init(RecordLinuxPluginClass* klass);
+static void record_linux_plugin_init(RecordLinuxPlugin* self);
+static void record_linux_plugin_dispose(GObject* object);
 
-G_DEFINE_TYPE(RecordLinuxPlugin, record_linux_plugin, G_TYPE_OBJECT)
+// A static function that does the manual registration
+static GType record_linux_plugin_get_type_once(void) {
+  // Tells GObject how large the class is, how large each instance is, etc.
+  static const GTypeInfo info = {
+    /* class_size = */ sizeof(RecordLinuxPluginClass),
+    /* base_init = */  nullptr,
+    /* base_finalize = */ nullptr,
+    /* class_init = */  (GClassInitFunc) record_linux_plugin_class_init,
+    /* class_finalize = */ nullptr,
+    /* class_data = */  nullptr,
+    // The key line: allocate full struct size:
+    /* instance_size = */ sizeof(RecordLinuxPlugin),
+    /* n_preallocs = */ 0,
+    // This is called once per instance to init your fields:
+    /* instance_init = */ (GInstanceInitFunc) record_linux_plugin_init,
+    /* value_table = */   nullptr,
+  };
 
-// Called when the plugin is disposed
+  return g_type_register_static(
+    G_TYPE_OBJECT,
+    "RecordLinuxPlugin",
+    &info,
+    (GTypeFlags)0
+  );
+}
+
+// The public function that returns the GType
+GType record_linux_plugin_get_type(void) {
+  static gsize type_id_volatile = 0;
+  if (g_once_init_enter(&type_id_volatile)) {
+    GType type_id = record_linux_plugin_get_type_once();
+    g_once_init_leave(&type_id_volatile, type_id);
+  }
+  return type_id_volatile;
+}
+
+// ---------------------------------------------------------------------------
+// 2) Class init + instance init (replacing G_DEFINE_TYPE macro approach)
+// ---------------------------------------------------------------------------
+static void record_linux_plugin_class_init(RecordLinuxPluginClass* klass) {
+  GObjectClass* object_class = G_OBJECT_CLASS(klass);
+  object_class->dispose = record_linux_plugin_dispose;
+}
+
+// Called per-instance
+static void record_linux_plugin_init(RecordLinuxPlugin* self) {
+  // Initialize fields
+  self->pa_handle = nullptr;
+  self->is_recording = false;
+  self->is_paused = false;
+  self->is_stream_mode = false;
+  self->record_thread_handle = nullptr;
+  self->file_handle = nullptr;
+  self->file_path.clear();
+  self->total_data_bytes = 0;
+
+  // Zero out WavHeader
+  memset(&self->wav_header, 0, sizeof(WavHeader));
+
+  // Initialize your mutexes & conds
+  g_mutex_init(&self->state_mutex);
+  g_cond_init(&self->pause_cond);
+
+  // If you want to zero out buffer
+  memset(self->buffer, 0, RecordLinuxPlugin::K_BUFFER_SIZE);
+}
+
+// ---------------------------------------------------------------------------
+// 3) The dispose method (like your old record_linux_plugin_dispose)
+// ---------------------------------------------------------------------------
 static void record_linux_plugin_dispose(GObject* object) {
   RecordLinuxPlugin* self = (RecordLinuxPlugin*)object;
 
@@ -49,40 +119,102 @@ static void record_linux_plugin_dispose(GObject* object) {
   G_OBJECT_CLASS(record_linux_plugin_parent_class)->dispose(object);
 }
 
-static void record_linux_plugin_class_init(RecordLinuxPluginClass* klass) {
-  GObjectClass* object_class = G_OBJECT_CLASS(klass);
-  object_class->dispose = record_linux_plugin_dispose;
+// ---------------------------------------------------------------------------
+// 4) The plugin registration that Flutter calls
+// ---------------------------------------------------------------------------
+extern "C" void record_linux_plugin_register_with_registrar(FlPluginRegistrar* registrar) {
+  RecordLinuxPlugin* plugin = (RecordLinuxPlugin*) g_object_new(
+      record_linux_plugin_get_type(),
+      nullptr);
+
+  // Create a method channel, exactly as your old code
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  g_autoptr(FlMethodChannel) channel =
+      fl_method_channel_new(fl_plugin_registrar_get_messenger(registrar),
+                            "record_linux",  // channel name
+                            FL_METHOD_CODEC(codec));
+
+  plugin->channel = channel;
+
+  // Setup your method call handler
+  fl_method_channel_set_method_call_handler(
+      channel,
+      [](FlMethodChannel* channel, FlMethodCall* method_call, gpointer user_data) {
+        // We'll call your big method dispatcher function
+        RecordLinuxPlugin* self = (RecordLinuxPlugin*)user_data;
+
+        // e.g. record_linux_plugin_handle_method_call(self, method_call);
+        // or inline the logic below
+        // (We’ll include your big method-call logic next)
+        const gchar* method = fl_method_call_get_name(method_call);
+        FlMethodResponse* response = nullptr;
+
+        // The same if/else or strcmp logic you had before
+        if (strcmp(method, "create") == 0) {
+          response = create_recorder(self);
+        } else if (strcmp(method, "dispose") == 0) {
+          response = dispose_recorder(self);
+        } else if (strcmp(method, "startRecordingFile") == 0) {
+          FlValue* args = fl_method_call_get_args(method_call);
+          if (args && fl_value_get_type(args) == FL_VALUE_TYPE_STRING) {
+            const gchar* path = fl_value_get_string(args);
+            response = start_recording_file(self, path);
+          } else {
+            response = FL_METHOD_RESPONSE(fl_method_error_response_new(
+                "argument_error", "Expected path string", nullptr));
+          }
+        } else if (strcmp(method, "stopRecordingFile") == 0) {
+          response = stop_recording_file(self);
+        } else if (strcmp(method, "startRecording") == 0) {
+          response = start_recording_stream(self);
+        } else if (strcmp(method, "stopRecording") == 0) {
+          if (self->is_stream_mode) {
+            response = stop_recording_stream(self);
+          } else {
+            response = stop_recording_file(self);
+          }
+        } else if (strcmp(method, "cancelRecording") == 0) {
+          response = cancel_recording(self);
+        } else if (strcmp(method, "pauseRecording") == 0) {
+          response = pause_recording(self);
+        } else if (strcmp(method, "resumeRecording") == 0) {
+          response = resume_recording(self);
+        } else if (strcmp(method, "listInputDevices") == 0) {
+          response = list_input_devices(self);
+        } else if (strcmp(method, "isEncoderSupported") == 0) {
+          FlValue* args = fl_method_call_get_args(method_call);
+          const gchar* enc = (args && fl_value_get_type(args) == FL_VALUE_TYPE_STRING)
+                             ? fl_value_get_string(args)
+                             : nullptr;
+          response = is_encoder_supported(self, enc);
+        } else if (strcmp(method, "getAmplitude") == 0) {
+          response = get_amplitude(self);
+        } else if (strcmp(method, "hasPermission") == 0) {
+          response = has_permission(self);
+        } else if (strcmp(method, "isPaused") == 0) {
+          response = is_paused_fn(self);
+        } else if (strcmp(method, "isRecording") == 0) {
+          response = is_recording_fn(self);
+        } else {
+          response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+        }
+
+        fl_method_call_respond(method_call, response, nullptr);
+      },
+      plugin,
+      nullptr);
 }
 
-static void record_linux_plugin_init(RecordLinuxPlugin* self) {
-  // Initialize fields
-  self->pa_handle = nullptr;
-  self->is_recording = false;
-  self->is_paused = false;
-  self->is_stream_mode = false;
-  self->record_thread_handle = nullptr;
-  self->file_handle = nullptr;
-  self->file_path.clear();
-  self->total_data_bytes = 0;
-
-  // init WAV header to zeros
-  memset(&self->wav_header, 0, sizeof(WavHeader));
-
-  g_mutex_init(&self->state_mutex);
-  g_cond_init(&self->pause_cond);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Helpers for WAV & PulseAudio
-////////////////////////////////////////////////////////////////////////////////
-
+// ---------------------------------------------------------------------------
+// 5) Your existing helper functions for WAV & PulseAudio
+//    (unchanged from your snippet) EXCEPT no references to g_type_class_set_instance_size
+// ---------------------------------------------------------------------------
 static void write_wav_header(FILE* file, const WavHeader& header) {
   fseek(file, 0, SEEK_SET);
   fwrite(&header, sizeof(header), 1, file);
   fflush(file);
 }
 
-// Build a fresh WavHeader
 static WavHeader init_wav_header() {
   WavHeader hdr;
   memcpy(hdr.riff, "RIFF", 4);
@@ -92,7 +224,7 @@ static WavHeader init_wav_header() {
 
   hdr.overall_size = 0;
   hdr.length_of_fmt = 16;
-  hdr.format_type = 1;     // PCM
+  hdr.format_type = 1; // PCM
   hdr.channels = 2;
   hdr.sample_rate = 44100;
   hdr.bits_per_sample = 16;
@@ -105,7 +237,8 @@ static WavHeader init_wav_header() {
 static void finalize_wav_header(RecordLinuxPlugin* self) {
   if (!self->file_handle) return;
   self->wav_header.data_size = (uint32_t)self->total_data_bytes;
-  self->wav_header.overall_size = (uint32_t)(self->total_data_bytes + sizeof(WavHeader) - 8);
+  self->wav_header.overall_size =
+      (uint32_t)(self->total_data_bytes + sizeof(WavHeader) - 8);
 
   write_wav_header(self->file_handle, self->wav_header);
 }
@@ -144,10 +277,9 @@ static void disconnect_from_pulse(RecordLinuxPlugin* self) {
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// The background recording thread
-////////////////////////////////////////////////////////////////////////////////
-
+// ---------------------------------------------------------------------------
+// 6) The background recording thread logic (unchanged from your snippet)
+// ---------------------------------------------------------------------------
 static gpointer record_thread_func(gpointer user_data) {
   RecordLinuxPlugin* self = (RecordLinuxPlugin*)user_data;
   int error = 0;
@@ -215,17 +347,16 @@ static gpointer record_thread_func(gpointer user_data) {
   return nullptr;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Implement the non-static plugin methods
-////////////////////////////////////////////////////////////////////////////////
-
+// ---------------------------------------------------------------------------
+// 7) All your plugin method implementations EXACTLY as in your snippet
+// ---------------------------------------------------------------------------
 FlMethodResponse* create_recorder(RecordLinuxPlugin* self) {
   // Possibly no-op
   return FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
 }
 
 FlMethodResponse* dispose_recorder(RecordLinuxPlugin* self) {
-  // Stop recording if in progress
+  // ...
   g_mutex_lock(&self->state_mutex);
   self->is_recording = false;
   g_cond_broadcast(&self->pause_cond);
@@ -245,6 +376,7 @@ FlMethodResponse* dispose_recorder(RecordLinuxPlugin* self) {
 }
 
 FlMethodResponse* start_recording_file(RecordLinuxPlugin* self, const gchar* path) {
+  // EXACT same as your snippet
   g_mutex_lock(&self->state_mutex);
   if (self->is_recording) {
     g_mutex_unlock(&self->state_mutex);
@@ -260,9 +392,8 @@ FlMethodResponse* start_recording_file(RecordLinuxPlugin* self, const gchar* pat
       g_error_free(gerror);
       return (FlMethodResponse*) resp;
     }
-    return (FlMethodResponse*) fl_method_error_response_new("pulse_error",
-                                                           "Unknown PulseAudio error",
-                                                           nullptr);
+    return (FlMethodResponse*) fl_method_error_response_new(
+        "pulse_error", "Unknown PulseAudio error", nullptr);
   }
 
   self->wav_header = init_wav_header();
@@ -290,6 +421,7 @@ FlMethodResponse* start_recording_file(RecordLinuxPlugin* self, const gchar* pat
 }
 
 FlMethodResponse* stop_recording_file(RecordLinuxPlugin* self) {
+  // ...
   g_mutex_lock(&self->state_mutex);
   bool was_recording = self->is_recording;
   self->is_recording = false;
@@ -301,7 +433,6 @@ FlMethodResponse* stop_recording_file(RecordLinuxPlugin* self) {
     self->record_thread_handle = nullptr;
   }
 
-  // finalize WAV
   finalize_wav_header(self);
 
   if (self->file_handle) {
@@ -315,6 +446,7 @@ FlMethodResponse* stop_recording_file(RecordLinuxPlugin* self) {
 }
 
 FlMethodResponse* start_recording_stream(RecordLinuxPlugin* self) {
+  // ...
   g_mutex_lock(&self->state_mutex);
   if (self->is_recording) {
     g_mutex_unlock(&self->state_mutex);
@@ -330,9 +462,8 @@ FlMethodResponse* start_recording_stream(RecordLinuxPlugin* self) {
       g_error_free(gerror);
       return (FlMethodResponse*) resp;
     }
-    return (FlMethodResponse*) fl_method_error_response_new("pulse_error",
-                                                           "Unknown PulseAudio error",
-                                                           nullptr);
+    return (FlMethodResponse*) fl_method_error_response_new(
+        "pulse_error", "Unknown PulseAudio error", nullptr);
   }
 
   self->file_path.clear();
@@ -350,6 +481,7 @@ FlMethodResponse* start_recording_stream(RecordLinuxPlugin* self) {
 }
 
 FlMethodResponse* stop_recording_stream(RecordLinuxPlugin* self) {
+  // ...
   g_mutex_lock(&self->state_mutex);
   bool was_recording = self->is_recording;
   self->is_recording = false;
@@ -453,96 +585,4 @@ FlMethodResponse* is_recording_fn(RecordLinuxPlugin* self) {
 
   FlValue* result = fl_value_new_bool(rec);
   return FL_METHOD_RESPONSE(fl_method_success_response_new(result));
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// The method-call dispatcher
-////////////////////////////////////////////////////////////////////////////////
-
-static void record_linux_plugin_handle_method_call(RecordLinuxPlugin* self,
-                                                   FlMethodCall* method_call) {
-  const gchar* method = fl_method_call_get_name(method_call);
-  FlMethodResponse* response = nullptr;
-
-  if (strcmp(method, "create") == 0) {
-    response = create_recorder(self);
-  } else if (strcmp(method, "dispose") == 0) {
-    response = dispose_recorder(self);
-  } else if (strcmp(method, "startRecordingFile") == 0) {
-    // parse file path => call start_recording_file(self, path)
-    FlValue* args = fl_method_call_get_args(method_call);
-    if (args && fl_value_get_type(args) == FL_VALUE_TYPE_STRING) {
-      const gchar* path = fl_value_get_string(args);
-      response = start_recording_file(self, path);
-    } else {
-      response = FL_METHOD_RESPONSE(fl_method_error_response_new(
-          "argument_error", "Expected path string", nullptr));
-    }
-  } else if (strcmp(method, "stopRecordingFile") == 0) {
-    response = stop_recording_file(self);
-  } else if (strcmp(method, "startRecording") == 0) {
-    response = start_recording_stream(self);
-  } else if (strcmp(method, "stopRecording") == 0) {
-    if (self->is_stream_mode) {
-      response = stop_recording_stream(self);
-    } else {
-      response = stop_recording_file(self);
-    }
-  } else if (strcmp(method, "cancelRecording") == 0) {
-    response = cancel_recording(self);
-  } else if (strcmp(method, "pauseRecording") == 0) {
-    response = pause_recording(self);
-  } else if (strcmp(method, "resumeRecording") == 0) {
-    response = resume_recording(self);
-  } else if (strcmp(method, "listInputDevices") == 0) {
-    response = list_input_devices(self);
-  } else if (strcmp(method, "isEncoderSupported") == 0) {
-    FlValue* args = fl_method_call_get_args(method_call);
-    const gchar* enc = (args && fl_value_get_type(args) == FL_VALUE_TYPE_STRING)
-                       ? fl_value_get_string(args)
-                       : nullptr;
-    response = is_encoder_supported(self, enc);
-  } else if (strcmp(method, "getAmplitude") == 0) {
-    response = get_amplitude(self);
-  } else if (strcmp(method, "hasPermission") == 0) {
-    response = has_permission(self);
-  } else if (strcmp(method, "isPaused") == 0) {
-    response = is_paused_fn(self);
-  } else if (strcmp(method, "isRecording") == 0) {
-    response = is_recording_fn(self);
-  } else {
-    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
-  }
-
-  fl_method_call_respond(method_call, response, nullptr);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// The plugin registration
-////////////////////////////////////////////////////////////////////////////////
-
-extern "C" FLUTTER_PLUGIN_EXPORT void record_linux_plugin_register_with_registrar(
-    FlPluginRegistrar* registrar) {
-  // Create instance
-  RecordLinuxPlugin* plugin = (RecordLinuxPlugin*)g_object_new(
-      record_linux_plugin_get_type(), nullptr);
-
-  // Create a method channel
-  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
-  g_autoptr(FlMethodChannel) channel =
-      fl_method_channel_new(fl_plugin_registrar_get_messenger(registrar),
-                            "record_linux",
-                            FL_METHOD_CODEC(codec));
-
-  plugin->channel = channel;
-
-  // Set up method call handler
-  fl_method_channel_set_method_call_handler(
-      channel,
-      [](FlMethodChannel* channel, FlMethodCall* method_call, gpointer user_data) {
-        record_linux_plugin_handle_method_call(
-            (RecordLinuxPlugin*)user_data, method_call);
-      },
-      plugin,
-      nullptr);
 }

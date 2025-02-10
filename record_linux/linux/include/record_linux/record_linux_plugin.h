@@ -6,7 +6,7 @@
 #include <pulse/simple.h>
 #include <stdio.h>
 #include <stdint.h>
-#include <string>  // for std::string usage
+#include <string> // for std::string usage
 
 G_BEGIN_DECLS
 
@@ -14,7 +14,8 @@ G_BEGIN_DECLS
 //  WAV header struct used by both .h & .cc
 ////////////////////////////////////////////////////////////////////////////////
 #pragma pack(push, 1)
-typedef struct {
+typedef struct
+{
   char riff[4];
   uint32_t overall_size;
   char wave[4];
@@ -34,18 +35,19 @@ typedef struct {
 ////////////////////////////////////////////////////////////////////////////////
 //  Forward declarations of our GObject struct and class
 ////////////////////////////////////////////////////////////////////////////////
-typedef struct _RecordLinuxPlugin      RecordLinuxPlugin;
+typedef struct _RecordLinuxPlugin RecordLinuxPlugin;
 typedef struct _RecordLinuxPluginClass RecordLinuxPluginClass;
 
 ////////////////////////////////////////////////////////////////////////////////
 //  The RecordLinuxPlugin struct
 //  Must contain ALL your fields (like std::string file_path, buffer, etc.)
 ////////////////////////////////////////////////////////////////////////////////
-struct _RecordLinuxPlugin {
-  GObject parent_instance;  // MUST be first
+struct _RecordLinuxPlugin
+{
+  GObject parent_instance; // MUST be first
 
   // PulseAudio
-  pa_simple* pa_handle;
+  pa_simple *pa_handle;
   pa_sample_spec pa_spec;
 
   // Recording state
@@ -54,7 +56,7 @@ struct _RecordLinuxPlugin {
   bool is_stream_mode;
 
   // Thread & synchronization
-  GThread* record_thread_handle;
+  GThread *record_thread_handle;
   GMutex state_mutex;
   GCond pause_cond;
 
@@ -63,18 +65,19 @@ struct _RecordLinuxPlugin {
   uint8_t buffer[K_BUFFER_SIZE];
 
   // Flutter method channel
-  FlMethodChannel* channel;
+  FlMethodChannel *channel;
 
   // File-based recording
-  FILE* file_handle;
+  FILE *file_handle;
   size_t total_data_bytes;
-  std::string file_path;  // can call file_path.clear() safely
+  std::string file_path; // can call file_path.clear() safely
 
   // WAV header
   WavHeader wav_header;
 };
 
-struct _RecordLinuxPluginClass {
+struct _RecordLinuxPluginClass
+{
   GObjectClass parent_class;
 };
 
@@ -87,41 +90,41 @@ struct _RecordLinuxPluginClass {
 GType record_linux_plugin_get_type(void);
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-////////////////////////////////////////////////////////////////////////////////
-//  Exported registration function so Flutter can call it
-////////////////////////////////////////////////////////////////////////////////
-__attribute__((visibility("default")))
-void record_linux_plugin_register_with_registrar(FlPluginRegistrar* registrar);
+  ////////////////////////////////////////////////////////////////////////////////
+  //  Exported registration function so Flutter can call it
+  ////////////////////////////////////////////////////////////////////////////////
+  __attribute__((visibility("default"))) void record_linux_plugin_register_with_registrar(FlPluginRegistrar *registrar);
 
-////////////////////////////////////////////////////////////////////////////////
-//  Non-static function declarations matching the .cc definitions
-////////////////////////////////////////////////////////////////////////////////
-FlMethodResponse* create_recorder(RecordLinuxPlugin* self);
-FlMethodResponse* dispose_recorder(RecordLinuxPlugin* self);
+  ////////////////////////////////////////////////////////////////////////////////
+  //  Non-static function declarations matching the .cc definitions
+  ////////////////////////////////////////////////////////////////////////////////
+  FlMethodResponse *create_recorder(RecordLinuxPlugin *self);
+  FlMethodResponse *dispose_recorder(RecordLinuxPlugin *self);
 
-FlMethodResponse* start_recording_file(RecordLinuxPlugin* self, const gchar* path);
-FlMethodResponse* stop_recording_file(RecordLinuxPlugin* self);
+  FlMethodResponse *start_recording_file(RecordLinuxPlugin *self, const gchar *path);
+  FlMethodResponse *stop_recording_file(RecordLinuxPlugin *self);
 
-FlMethodResponse* start_recording_stream(RecordLinuxPlugin* self);
-FlMethodResponse* stop_recording_stream(RecordLinuxPlugin* self);
+  FlMethodResponse *start_recording_stream(RecordLinuxPlugin *self);
+  FlMethodResponse *stop_recording_stream(RecordLinuxPlugin *self);
 
-FlMethodResponse* cancel_recording(RecordLinuxPlugin* self);
-FlMethodResponse* pause_recording(RecordLinuxPlugin* self);
-FlMethodResponse* resume_recording(RecordLinuxPlugin* self);
+  FlMethodResponse *cancel_recording(RecordLinuxPlugin *self);
+  FlMethodResponse *pause_recording(RecordLinuxPlugin *self);
+  FlMethodResponse *resume_recording(RecordLinuxPlugin *self);
 
-FlMethodResponse* list_input_devices(RecordLinuxPlugin* self);
-FlMethodResponse* is_encoder_supported(RecordLinuxPlugin* self, const gchar* encoder);
-FlMethodResponse* get_amplitude(RecordLinuxPlugin* self);
-FlMethodResponse* has_permission(RecordLinuxPlugin* self);
-FlMethodResponse* is_paused_fn(RecordLinuxPlugin* self);
-FlMethodResponse* is_recording_fn(RecordLinuxPlugin* self);
+  FlMethodResponse *list_input_devices(RecordLinuxPlugin *self);
+  FlMethodResponse *is_encoder_supported(RecordLinuxPlugin *self, const gchar *encoder);
+  FlMethodResponse *get_amplitude(RecordLinuxPlugin *self);
+  FlMethodResponse *has_permission(RecordLinuxPlugin *self);
+  FlMethodResponse *is_paused_fn(RecordLinuxPlugin *self);
+  FlMethodResponse *is_recording_fn(RecordLinuxPlugin *self);
 
-G_END_DECLS
+  G_END_DECLS
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // FLUTTER_PLUGIN_RECORD_LINUX_PLUGIN_H_
+#endif // FLUTTER_PLUGIN_RECORD_LINUX_PLUGIN_H_
